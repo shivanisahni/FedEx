@@ -56,8 +56,12 @@ export async function scrapePortal() {
     await page.waitForLoadState('networkidle');
     await snap(page, 'after-login');
 
-    // Click "FedEx Customer Connection" in the FCC links box. It may open in a new tab.
-    const fccLink = page.getByText(/fedex customer connection/i).first();
+    // Click "FedEx Customer Connection" in the FCC Links tile, which lives in an iframe.
+    // It may open in a new tab.
+    const fccLink = page
+      .frameLocator('iframe[title="FCC Links"]')
+      .getByText(/fedex customer connection/i)
+      .first();
     const [popup] = await Promise.all([
       context.waitForEvent('page', { timeout: 15_000 }).catch(() => null),
       fccLink.click(),
