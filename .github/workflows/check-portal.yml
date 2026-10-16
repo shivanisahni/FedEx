@@ -26,12 +26,16 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
-      - name: Scrape portal and text me
+      - name: Scrape portal and notify me
         run: npm start
         env:
           PORTAL_URL: ${{ vars.PORTAL_URL || 'https://mybizaccount.fedex.com' }}
           PORTAL_USER: ${{ secrets.PORTAL_USER }}
           PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
+          NOTIFY_METHOD: ${{ vars.NOTIFY_METHOD || 'email' }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
           TWILIO_SID: ${{ secrets.TWILIO_SID }}
           TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
           TWILIO_NUMBER: ${{ secrets.TWILIO_NUMBER }}
