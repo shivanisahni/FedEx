@@ -34,6 +34,41 @@ async function tap(locator, timeout = 5000) {
   }
 }
 
+const TABLE = '[id="manifestForm:tablePickupManifest"]';
+const VIEWPORT = { width: 1440, height: 1000 };
+
+/**
+ * Screenshot of the entire table. The table body is a fixed-height (290px) scroll box and wider than
+ * the window, so widen the browser (the table is ~1550px wide) and let the body grow before capturing, then restore.
+ */
+export async function screenshotTable(page, path) {
+  const table = page.locator(TABLE);
+  await page.setViewportSize({ width: 1800, height: 1400 });
+  try {
+    await table.evaluate((el) => {
+      el.querySelectorAll('.ui-datatable-scrollable-body').forEach((b) => {
+        b.style.height = 'auto';
+        b.style.maxHeight = 'none';
+        b.style.overflow = 'visible';
+      });
+    });
+    await table.screenshot({ path });
+  } finally {
+    await page.setViewportSize(VIEWPORT);
+  }
+}
+
+/** Clicks the table's Excel button and saves the download. Returns the saved path. */
+async function downloadExcel(page) {
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    tap(page.locator('[id="manifestForm:buttonGenerateExcel"]')),
+  ]);
+  const path = `artifacts/${download.suggestedFilename() || 'pickups.xlsx'}`;
+  await download.saveAs(path);
+  return path;
+}
+
 /**
  * Reads the whole Pickup Manifest table on the current page.
  * Header cells and data cells line up 1:1. Visible text is truncated for some cells
@@ -177,7 +212,8 @@ export async function scrapePortal() {
   // The portal's date picker defaults to the *browser's* clock. GitHub runners are on UTC, which rolls
   // over to "tomorrow" mid-evening in the US, so pin the browser to the portal's timezone.
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 1000 },
+    acceptDownloads: true,
+    viewport: VIEWPORT,
     timezoneId: PORTAL_TZ,
     locale: 'en-US',
   });
@@ -245,15 +281,33 @@ export async function scrapePortal() {
     const stated = Number(((await current.getByText(/\d+ records? found/i).first().innerText()).match(/\d+/) || [])[0]);
     if (stated !== count) note = `WARNING: page says ${stated} records but only ${count} were read.`;
 
+    // Extras, best-effort: a screenshot of the whole table and the portal's own Excel export.
+    const attachments = [];
+    const skipped = [];
+    try {
+      await screenshotTable(current, 'artifacts/pickups-table.png');
+      attachments.push({ filename: 'pickups-table.png', path: 'artifacts/pickups-table.png' });
+    } catch (err) {
+      skipped.push(`screenshot skipped (${err.message.split('\n')[0]})`);
+    }
+    try {
+      const xlsx = await downloadExcel(current);
+      attachments.push({ filename: xlsx.split('/').pop(), path: xlsx });
+    } catch (err) {
+      skipped.push(`Excel export skipped (${err.message.split('\n')[0]})`);
+    }
+    if (skipped.length) note = [note, ...skipped].filter(Boolean).join('; ');
+
     if (count === 0) {
       const none = 'No pickups are listed on the portal right now. (The portal clears the previous day after midnight Eastern.)';
-      return { subject: 'FedEx pickups: none listed', text: [note, none].filter(Boolean).join('\n'), html: `<p>${esc(none)}</p>` };
+      return { subject: 'FedEx pickups: none listed', text: [note, none].filter(Boolean).join('\n'), html: `<p>${esc(none)}</p>`, attachments };
     }
 
     return {
       subject: `FedEx pickups: ${count} total, ${open} open`,
       text: [note, ...text].filter(Boolean).join('\n'),
       html: (note ? `<p><b>${esc(note)}</b></p>` : '') + html,
+      attachments,
     };
   } catch (err) {
     // Save a screenshot so the workflow can upload it for debugging.
