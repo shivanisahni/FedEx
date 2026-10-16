@@ -7,19 +7,24 @@ let step = 0;
 async function snap(page, name) {
   if (!DEBUG) return;
   const base = `artifacts/${String(++step).padStart(2, '0')}-${name}`;
-  await page.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => {});
   const { writeFile } = await import('node:fs/promises');
+  // Viewport shot only: the FCC app makes full-page screenshots 1px wide.
+  await page.screenshot({ path: `${base}.png` }).catch(() => {});
   await writeFile(`${base}.html`, await page.content()).catch(() => {});
+  await writeFile(`${base}.txt`, await page.locator('body').innerText().catch(() => '')).catch(() => {});
   console.log(`[debug] saved ${base} (${page.url()})`);
 }
 
-/** Click something that may or may not be there (e.g. a tab that's already selected). */
-async function clickIfPresent(locator, timeout = 5000) {
+/**
+ * Click an element. The FCC app's tabs are rendered with width:0, which Playwright treats as
+ * unclickable, so fall back to dispatching the click event directly (their handlers are onclick).
+ */
+async function tap(locator, timeout = 5000) {
+  const el = locator.first();
   try {
-    await locator.first().click({ timeout });
-    return true;
+    await el.click({ timeout });
   } catch {
-    return false;
+    await el.dispatchEvent('click', undefined, { timeout });
   }
 }
 
@@ -33,7 +38,7 @@ export async function scrapePortal() {
   if (!url) throw new Error('PORTAL_URL is not set');
 
   const browser = await chromium.launch();
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   let current = page; // the page we're working in; may switch if FCC opens in a new tab
   try {
@@ -70,14 +75,17 @@ export async function scrapePortal() {
     await current.waitForLoadState('networkidle');
     await snap(current, 'fcc-home');
 
-    // Pickup Manifest (bottom nav "P&D Manifests" and/or the "Pickup Manifest" tab).
-    await clickIfPresent(current.getByText(/p&d manifests/i));
-    await clickIfPresent(current.getByText(/^\s*pickup manifest\s*$/i));
+    // Bottom nav "P&D Manifests" (recorded flow: this lands on Pickup Manifest, then Search).
+    await tap(current.getByText('P&D Manifests'));
     await current.waitForLoadState('networkidle');
-    await snap(current, 'pickup-manifest');
+    await snap(current, 'pd-manifests');
+
+    // Pickup Manifest is the default tab, but click it if it's offered and we're not on it.
+    await tap(current.locator('li, a, button', { hasText: /^\s*Pickup Manifest\s*$/ }), 2000).catch(() => {});
 
     // Search loads all pickups for the day.
-    await current.getByRole('button', { name: /^search$/i }).first().click();
+    await snap(current, 'pickup-manifest');
+    await tap(current.getByRole('button', { name: 'Search' }), 30_000);
     await current.getByText(/\d+ records? found/i).first().waitFor({ timeout: 60_000 });
     await snap(current, 'search-results');
 
@@ -94,7 +102,7 @@ export async function scrapePortal() {
     return [`FedEx pickups: ${count}`, ...rows.slice(0, 60)];
   } catch (err) {
     // Save a screenshot so the workflow can upload it for debugging.
-    await current.screenshot({ path: 'artifacts/failure.png', fullPage: true }).catch(() => {});
+    await snap(current, 'failure'); await current.screenshot({ path: 'artifacts/failure.png' }).catch(() => {});
     throw err;
   } finally {
     await browser.close();
