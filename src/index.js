@@ -5,8 +5,8 @@ import { notify } from './notify.js';
 await mkdir('artifacts', { recursive: true });
 
 try {
-  const [subject, ...rest] = await scrapePortal();
-  await notify(subject, rest.join('\n') || subject);
+  const { subject, text, html } = await scrapePortal();
+  await notify(subject, text, html);
 } catch (err) {
   console.error(err);
   // Notify on failure too, so a silently broken scraper doesn't look like "nothing new".
