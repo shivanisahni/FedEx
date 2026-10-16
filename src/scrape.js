@@ -87,7 +87,13 @@ export async function scrapePortal() {
   if (!url) throw new Error('PORTAL_URL is not set');
 
   const browser = await chromium.launch();
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  // The portal's date picker defaults to the *browser's* clock. GitHub runners are on UTC, which rolls to
+  // "tomorrow" at 5pm Pacific, so pin the browser to Pacific to match what you see.
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+    timezoneId: 'America/Los_Angeles',
+    locale: 'en-US',
+  });
   const page = await context.newPage();
   let current = page; // the page we're working in; may switch if FCC opens in a new tab
   try {
