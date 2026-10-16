@@ -75,20 +75,17 @@ export async function scrapePortal() {
     await current.waitForLoadState('networkidle');
     await snap(current, 'fcc-home');
 
-    // Bottom nav "P&D Manifests", then the "Pickup Manifest" tab. (The app is ICEfaces; tabs are <li>s.)
-    await tap(current.locator('li', { hasText: /^\s*P&D Manifests\s*$/ }));
+    // Bottom nav "P&D Manifests" (recorded flow: this lands on Pickup Manifest, then Search).
+    await tap(current.getByText('P&D Manifests'));
     await current.waitForLoadState('networkidle');
     await snap(current, 'pd-manifests');
-    await tap(current.locator('li, a, button', { hasText: /^\s*Pickup Manifest\s*$/ }));
-    await current.waitForLoadState('networkidle');
-    await snap(current, 'pickup-manifest');
+
+    // Pickup Manifest is the default tab, but click it if it's offered and we're not on it.
+    await tap(current.locator('li, a, button', { hasText: /^\s*Pickup Manifest\s*$/ }), 2000).catch(() => {});
 
     // Search loads all pickups for the day.
-    await tap(
-      current.locator('input[type=button], input[type=submit], button, a', { hasText: /^\s*Search\s*$/ })
-        .or(current.locator('input[value="Search"]')),
-      30_000,
-    );
+    await snap(current, 'pickup-manifest');
+    await tap(current.getByRole('button', { name: 'Search' }), 30_000);
     await current.getByText(/\d+ records? found/i).first().waitFor({ timeout: 60_000 });
     await snap(current, 'search-results');
 
