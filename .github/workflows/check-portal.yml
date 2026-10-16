@@ -2,12 +2,13 @@ name: Check portal
 
 on:
   schedule:
-    # GitHub cron is UTC and ignores DST. These three lines run every 30 min from
-    # 17:00 to 01:00 UTC = 10am-6pm PDT (UTC-7). When clocks fall back to PST (UTC-8) on Nov 1 this
-    # becomes 9am-5pm; shift every hour below by +1 (18-23, 0-1, 2:00) to keep 10am-6pm.
-    - cron: '*/30 17-23 * * *'
-    - cron: '*/30 0 * * *'
-    - cron: '0 1 * * *'
+    # GitHub cron is UTC and ignores DST. These three lines run every 30 min at :07 and :37 from
+    # 17:07 to 01:07 UTC = about 10am-6pm PDT (UTC-7). Off-peak minutes on purpose: GitHub delays or
+    # drops runs at :00 and :30. When clocks fall back to PST (UTC-8) on Nov 1 this becomes 9am-5pm;
+    # shift every hour below by +1 (18-23, 0, 2) to keep 10am-6pm.
+    - cron: '7,37 17-23 * * *'
+    - cron: '7,37 0 * * *'
+    - cron: '7 1 * * *'
   workflow_dispatch: # manual "Run workflow" button
     inputs:
       debug:
