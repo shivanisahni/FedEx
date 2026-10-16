@@ -1,5 +1,11 @@
 import { chromium } from 'playwright';
 
+/** Thrown when signing in fails, so the caller can stop retrying instead of hammering the login. */
+export class LoginError extends Error {}
+
+// FedEx's portal runs on Eastern time; its date picker defaults to the browser's clock, so match it.
+const PORTAL_TZ = 'America/New_York';
+
 const DEBUG = !!process.env.DEBUG_DUMP;
 let step = 0;
 
@@ -81,7 +87,8 @@ export function formatPickups({ headers, rows }) {
   const v = (r, k) => (at[k] >= 0 ? r[at[k]] : '');
 
   const pickups = rows.map((r) => ({
-    close: v(r, 'close'), ready: v(r, 'ready'), shipper: v(r, 'shipper'),
+    close: v(r, 'close') || '--', ready: v(r, 'ready') || '--',
+    shipper: v(r, 'shipper') || (v(r, 'shipperNo') ? `Shipper # ${v(r, 'shipperNo')}` : '(no name)'),
     address: `${v(r, 'address')}, ${v(r, 'city')} ${v(r, 'postal')}`.replace(/\s+/g, ' ').trim(),
     pkgs: v(r, 'pkgs'), isClosed: !!v(r, 'closed'), closedAt: v(r, 'closed'),
     details: [
@@ -96,7 +103,7 @@ export function formatPickups({ headers, rows }) {
   const open = pickups.filter((p) => !p.isClosed).length;
   const closed = pickups.length - open;
   const day = new Date().toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles',
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: PORTAL_TZ,
   });
 
   const text = [
@@ -167,11 +174,11 @@ export async function scrapePortal() {
   if (!url) throw new Error('PORTAL_URL is not set');
 
   const browser = await chromium.launch();
-  // The portal's date picker defaults to the *browser's* clock. GitHub runners are on UTC, which rolls to
-  // "tomorrow" at 5pm Pacific, so pin the browser to Pacific to match what you see.
+  // The portal's date picker defaults to the *browser's* clock. GitHub runners are on UTC, which rolls
+  // over to "tomorrow" mid-evening in the US, so pin the browser to the portal's timezone.
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
-    timezoneId: 'America/Los_Angeles',
+    timezoneId: PORTAL_TZ,
     locale: 'en-US',
   });
   const page = await context.newPage();
@@ -183,17 +190,21 @@ export async function scrapePortal() {
     const { PORTAL_USER, PORTAL_PASS } = process.env;
     if (!PORTAL_USER || !PORTAL_PASS) throw new Error('PORTAL_USER / PORTAL_PASS are not set');
 
-    await page.locator('input[type=submit][value="Sign In"]').click();
+    try {
+      await page.locator('input[type=submit][value="Sign In"]').click();
 
-    await page.locator('input[name=identifier]').fill(PORTAL_USER);
-    await page.getByRole('button', { name: /next|continue/i }).click();
+      await page.locator('input[name=identifier]').fill(PORTAL_USER);
+      await page.getByRole('button', { name: /next|continue/i }).click();
 
-    await page.locator('input[type=password]').fill(PORTAL_PASS);
-    await page.getByRole('button', { name: /sign in|log in|verify|next/i }).click();
+      await page.locator('input[type=password]').fill(PORTAL_PASS);
+      await page.getByRole('button', { name: /sign in|log in|verify|next/i }).click();
 
-    // Wait until we're back on the portal (off the Okta domain).
-    await page.waitForURL(/mybizaccount\.fedex\.com/, { timeout: 60_000 });
-    await page.waitForLoadState('networkidle');
+      // Wait until we're back on the portal (off the Okta domain).
+      await page.waitForURL(/mybizaccount\.fedex\.com/, { timeout: 60_000 });
+      await page.waitForLoadState('networkidle');
+    } catch (err) {
+      throw new LoginError(`Login failed: ${err.message.split('\n')[0]}`);
+    }
     await snap(page, 'after-login');
 
     // Click "FedEx Customer Connection" in the FCC Links tile, which lives in an iframe.
@@ -233,6 +244,11 @@ export async function scrapePortal() {
     // Sanity check: the page states how many records it found; flag a mismatch rather than under-report.
     const stated = Number(((await current.getByText(/\d+ records? found/i).first().innerText()).match(/\d+/) || [])[0]);
     if (stated !== count) note = `WARNING: page says ${stated} records but only ${count} were read.`;
+
+    if (count === 0) {
+      const none = 'No pickups are listed on the portal right now. (The portal clears the previous day after midnight Eastern.)';
+      return { subject: 'FedEx pickups: none listed', text: [note, none].filter(Boolean).join('\n'), html: `<p>${esc(none)}</p>` };
+    }
 
     return {
       subject: `FedEx pickups: ${count} total, ${open} open`,
