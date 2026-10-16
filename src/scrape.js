@@ -3,6 +3,9 @@ import { chromium } from 'playwright';
 /** Thrown when signing in fails, so the caller can stop retrying instead of hammering the login. */
 export class LoginError extends Error {}
 
+// FedEx's portal runs on Eastern time; its date picker defaults to the browser's clock, so match it.
+const PORTAL_TZ = 'America/New_York';
+
 const DEBUG = !!process.env.DEBUG_DUMP;
 let step = 0;
 
@@ -100,7 +103,7 @@ export function formatPickups({ headers, rows }) {
   const open = pickups.filter((p) => !p.isClosed).length;
   const closed = pickups.length - open;
   const day = new Date().toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles',
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: PORTAL_TZ,
   });
 
   const text = [
@@ -171,11 +174,11 @@ export async function scrapePortal() {
   if (!url) throw new Error('PORTAL_URL is not set');
 
   const browser = await chromium.launch();
-  // The portal's date picker defaults to the *browser's* clock. GitHub runners are on UTC, which rolls to
-  // "tomorrow" at 5pm Pacific, so pin the browser to Pacific to match what you see.
+  // The portal's date picker defaults to the *browser's* clock. GitHub runners are on UTC, which rolls
+  // over to "tomorrow" mid-evening in the US, so pin the browser to the portal's timezone.
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
-    timezoneId: 'America/Los_Angeles',
+    timezoneId: PORTAL_TZ,
     locale: 'en-US',
   });
   const page = await context.newPage();
