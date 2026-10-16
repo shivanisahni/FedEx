@@ -6,9 +6,9 @@ import nodemailer from 'nodemailer';
  * and optionally EMAIL_TO (defaults to EMAIL_USER, i.e. email yourself).
  * Set DRY_RUN=1 to print instead of send.
  */
-export async function sendEmail(subject, body, html) {
+export async function sendEmail(subject, body, html, attachments = []) {
   if (process.env.DRY_RUN) {
-    console.log(`[dry-run] would send email:\nSubject: ${subject}\n\n${body}`);
+    console.log(`[dry-run] would send email:\nSubject: ${subject}\nAttachments: ${attachments.map((a) => a.filename).join(', ') || 'none'}\n\n${body}`);
     return;
   }
 
@@ -30,6 +30,7 @@ export async function sendEmail(subject, body, html) {
     subject,
     text: body,
     ...(html && { html }),
+    attachments,
   });
   console.log(`Email sent: ${info.messageId}`);
 }

@@ -5,8 +5,8 @@ import { notify } from './notify.js';
 await mkdir('artifacts', { recursive: true });
 
 try {
-  const { subject, text, html } = await scrapePortal();
-  await notify(subject, text, html);
+  const { subject, text, html, attachments } = await scrapePortal();
+  await notify(subject, text, html, attachments);
 } catch (err) {
   console.error(err);
   if (err instanceof LoginError) {
