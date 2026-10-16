@@ -29,6 +29,49 @@ async function tap(locator, timeout = 5000) {
 }
 
 /**
+ * Reads the Pickup Manifest table on the current page.
+ * Columns are found by header name (the header row and data rows line up 1:1), and shipper
+ * names come from the tooltip attribute because the visible text is truncated ("BAY AREA...").
+ * Returns [{ shipper, address, city, close }] sorted by close time.
+ */
+export async function extractPickups(page) {
+  return page.evaluate(() => {
+    const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
+    // The page has a header-only copy of the table (sticky header) and the real one; use the one with rows.
+    const candidates = [...document.querySelectorAll('th')]
+      .filter((t) => /PU List/.test(t.innerText))
+      .map((th) => {
+        const heads = [...th.parentElement.children].map((c) => clean(c.innerText));
+        const rows = [...th.closest('table').querySelectorAll('tr')]
+          .map((tr) => [...tr.children].filter((c) => c.tagName === 'TD'))
+          .filter((tds) => tds.length === heads.length);
+        return { heads, rows };
+      });
+    if (!candidates.length) return null;
+    const { heads, rows } = candidates.reduce((a, b) => (b.rows.length > a.rows.length ? b : a));
+    const col = (re) => heads.findIndex((h) => re.test(h));
+    const idx = {
+      shipper: col(/^Shipper Name/),
+      address: col(/^Address/),
+      city: col(/^City/),
+      close: col(/^Close/),
+    };
+    const full = (td) => {
+      const el = td.querySelector('[oldtitle]') || td.querySelector('[title]:not([title=""])');
+      return clean((el && (el.getAttribute('oldtitle') || el.getAttribute('title'))) || td.innerText);
+    };
+    return rows
+      .map((tds) => ({
+        shipper: full(tds[idx.shipper]),
+        address: full(tds[idx.address]),
+        city: full(tds[idx.city]),
+        close: clean(tds[idx.close].innerText),
+      }))
+      .sort((a, b) => a.close.localeCompare(b.close));
+  });
+}
+
+/**
  * Opens the portal, logs in, goes to FedEx Customer Connection -> Pickup Manifest -> Search,
  * and returns [subject, ...bodyLines] for the notification.
  * Everything portal-specific lives here.
@@ -89,17 +132,17 @@ export async function scrapePortal() {
     await current.getByText(/\d+ records? found/i).first().waitFor({ timeout: 60_000 });
     await snap(current, 'search-results');
 
-    // TODO: choose what to report. Placeholder: record count + every row's cells, joined by " | ".
-    const count = (await current.getByText(/\d+ records? found/i).first().innerText()).trim();
-    const rows = await current.locator('table tr').evaluateAll((trs) =>
-      trs
-        .map((tr) =>
-          [...tr.querySelectorAll('td')].map((td) => td.innerText.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' | '),
-        )
-        .filter(Boolean),
-    );
+    const pickups = await extractPickups(current);
+    if (!pickups) throw new Error('Could not find the pickup table on the results page');
 
-    return [`FedEx pickups: ${count}`, ...rows.slice(0, 60)];
+    const count = pickups.length;
+    const lines = pickups.map((p) => `${p.close}  ${p.shipper} - ${p.address}, ${p.city}`);
+
+    // Sanity check: the page states how many records it found; flag a mismatch rather than under-report.
+    const stated = Number(((await current.getByText(/\d+ records? found/i).first().innerText()).match(/\d+/) || [])[0]);
+    if (stated !== count) lines.push(`WARNING: page says ${stated} records but only ${count} were read.`);
+
+    return [`FedEx pickups: ${count} today`, ...(lines.length ? lines : ['No pickups listed.'])];
   } catch (err) {
     // Save a screenshot so the workflow can upload it for debugging.
     await snap(current, 'failure'); await current.screenshot({ path: 'artifacts/failure.png' }).catch(() => {});
