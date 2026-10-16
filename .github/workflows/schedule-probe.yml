@@ -1,0 +1,14 @@
+name: Schedule probe
+
+# Temporary: checks whether GitHub's scheduler fires for this repo at all. Delete after the test.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "probe fired at $(date -u) from event ${{ github.event_name }}"
