@@ -15,6 +15,10 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+  actions: write # lets the job disable this workflow after a failed login
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -46,6 +50,13 @@ jobs:
           TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
           TWILIO_NUMBER: ${{ secrets.TWILIO_NUMBER }}
           MY_PHONE: ${{ secrets.MY_PHONE }}
+
+      - name: Disable workflow after a failed login
+        if: failure() && hashFiles('artifacts/login-failed') != ''
+        run: gh workflow disable check-portal.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
 
       - name: Upload screenshots
         if: failure() || inputs.debug
