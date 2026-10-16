@@ -9,6 +9,11 @@ on:
     - cron: '*/30 0 * * *'
     - cron: '0 1 * * *'
   workflow_dispatch: # manual "Run workflow" button
+    inputs:
+      debug:
+        description: Save screenshots + HTML of each step as a downloadable artifact
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -29,6 +34,7 @@ jobs:
       - name: Scrape portal and notify me
         run: npm start
         env:
+          DEBUG_DUMP: ${{ inputs.debug && '1' || '' }}
           PORTAL_URL: ${{ vars.PORTAL_URL || 'https://mybizaccount.fedex.com' }}
           PORTAL_USER: ${{ secrets.PORTAL_USER }}
           PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
@@ -41,10 +47,10 @@ jobs:
           TWILIO_NUMBER: ${{ secrets.TWILIO_NUMBER }}
           MY_PHONE: ${{ secrets.MY_PHONE }}
 
-      - name: Upload failure screenshot
-        if: failure()
+      - name: Upload screenshots
+        if: failure() || inputs.debug
         uses: actions/upload-artifact@v4
         with:
-          name: failure-screenshot
+          name: portal-screenshots
           path: artifacts/
           if-no-files-found: ignore
